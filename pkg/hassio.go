@@ -1,6 +1,7 @@
 package ghm
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -16,7 +17,7 @@ type HassioMqttService interface {
 	PrepareCommandLineParams()
 	Name() string
 	Init(client MQTT.Client, topic, topicc, topica string, debug bool) error
-	Do(client MQTT.Client) error
+	Do(client MQTT.Client) (interface{}, error)
 	Close() error
 }
 
@@ -116,7 +117,7 @@ func (hmss HassioMqttServiceStub) Main() {
 				return
 			}
 
-			err := hmss.s.Do(client)
+			v, err := hmss.s.Do(client)
 			if err != nil {
 				log.Println(err)
 				actfail++
@@ -124,8 +125,16 @@ func (hmss HassioMqttServiceStub) Main() {
 					log.Println(token.Error())
 				}
 			} else {
-				if token := client.Publish(*topica, 0, false, "online"); token.Wait() && token.Error() != nil {
-					log.Println(token.Error())
+				jpl, err := json.Marshal(&v)
+				if err != nil {
+					log.Println(err)
+				} else {
+					if token := client.Publish(*topic, 0, false, jpl); token.Wait() && token.Error() != nil {
+						log.Println(token.Error())
+					}
+					if token := client.Publish(*topica, 0, false, "online"); token.Wait() && token.Error() != nil {
+						log.Println(token.Error())
+					}
 				}
 				actfail = 0
 			}
