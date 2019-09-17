@@ -141,6 +141,11 @@ func (hmss HassioMqttServiceStub) Main() {
 		}
 	}
 
+	if err := hmss.s.Close(); err != nil {
+		log.Println(err)
+	}
+	client.Disconnect(3000)
+
 	hmss.done <- struct{}{}
 }
 
