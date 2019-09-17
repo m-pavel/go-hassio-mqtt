@@ -106,26 +106,30 @@ func (hmss HassioMqttServiceStub) Main() {
 
 	log.Printf("Starting main loop with %d s. interval.\n", *interval)
 	for {
-		if *failcnt > 0 && actfail >= *failcnt {
-			log.Printf("Fail limit reached (%d). Exiting.\n", actfail)
-			return
-		}
-
-		err := hmss.s.Do(client)
-		if err != nil {
-			log.Println(err)
-			actfail++
-			if token := client.Publish(*topica, 0, false, "offline"); token.Wait() && token.Error() != nil {
-				log.Println(token.Error())
+		select {
+		case <-hmss.stop:
+			log.Println("Exiting because of signal.")
+			break
+		case <-time.After(time.Duration(*interval) * time.Second):
+			if *failcnt > 0 && actfail >= *failcnt {
+				log.Printf("Fail limit reached (%d). Exiting.\n", actfail)
+				return
 			}
-		} else {
-			if token := client.Publish(*topica, 0, false, "online"); token.Wait() && token.Error() != nil {
-				log.Println(token.Error())
-			}
-			actfail = 0
-		}
 
-		time.Sleep(time.Duration(*interval) * time.Second)
+			err := hmss.s.Do(client)
+			if err != nil {
+				log.Println(err)
+				actfail++
+				if token := client.Publish(*topica, 0, false, "offline"); token.Wait() && token.Error() != nil {
+					log.Println(token.Error())
+				}
+			} else {
+				if token := client.Publish(*topica, 0, false, "online"); token.Wait() && token.Error() != nil {
+					log.Println(token.Error())
+				}
+				actfail = 0
+			}
+		}
 	}
 
 	hmss.done <- struct{}{}
