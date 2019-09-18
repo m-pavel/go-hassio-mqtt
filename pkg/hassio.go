@@ -52,7 +52,7 @@ func (hmss HassioMqttServiceStub) sendState() error {
 		if err != nil {
 			log.Println(err)
 		} else {
-			if token := hmss.client.Publish(hmss.topic, 0, false, jpl); token.Wait() && token.Error() != nil {
+			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.Wait() && token.Error() != nil {
 				log.Println(token.Error())
 			}
 			if token := hmss.client.Publish(hmss.topica, 0, false, "online"); token.Wait() && token.Error() != nil {
