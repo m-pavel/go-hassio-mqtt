@@ -13,6 +13,11 @@ import (
 	"github.com/sevlyar/go-daemon"
 )
 
+const (
+	online  = "online"
+	offline = "offline"
+)
+
 type HassioMqttService interface {
 	PrepareCommandLineParams()
 	Name() string
@@ -44,7 +49,7 @@ func NewStub(s HassioMqttService) *HassioMqttServiceStub {
 func (hmss *HassioMqttServiceStub) sendState() error {
 	v, err := hmss.s.Do()
 	if err != nil {
-		if token := hmss.client.Publish(hmss.topica, 0, false, "offline"); token.Error() != nil {
+		if token := hmss.client.Publish(hmss.topica, 0, false, offline); token.Error() != nil {
 			log.Println(token.Error())
 		}
 	} else {
@@ -55,7 +60,7 @@ func (hmss *HassioMqttServiceStub) sendState() error {
 			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.Wait() && token.Error() != nil {
 				log.Println(token.Error())
 			}
-			if token := hmss.client.Publish(hmss.topica, 0, false, "online"); token.Error() != nil {
+			if token := hmss.client.Publish(hmss.topica, 0, false, online); token.Error() != nil {
 				log.Println(token.Error())
 			}
 		}
@@ -82,7 +87,6 @@ func (hmss *HassioMqttServiceStub) Main() {
 	flag.Parse()
 	daemon.AddCommand(daemon.StringFlag(signal, "stop"), syscall.SIGTERM, hmss.termHandler)
 	log.SetFlags(log.Lshortfile | log.Ltime | log.Ldate)
-
 
 	if *debug {
 		//MQTT.DEBUG = log.New(os.Stderr, "MQTT DEBUG    ", log.Ltime|log.Lshortfile)
@@ -137,6 +141,11 @@ func (hmss *HassioMqttServiceStub) Main() {
 		opts.Username = *user
 		opts.Password = *pass
 	}
+
+	opts.WillEnabled = true
+	opts.WillPayload = []byte(offline)
+	opts.WillTopic = *topica
+	opts.WillRetained = true
 
 	hmss.client = MQTT.NewClient(opts)
 	if token := hmss.client.Connect(); token.Wait() && token.Error() != nil {
