@@ -17,7 +17,7 @@ type HassioMqttService interface {
 	PrepareCommandLineParams()
 	Name() string
 	Init(client MQTT.Client, topic, topicc, topica string, debug bool, ss SendState) error
-	Do(client MQTT.Client) (interface{}, error)
+	Do() (interface{}, error)
 	Close() error
 }
 
@@ -26,7 +26,7 @@ type HassioMqttServiceStub struct {
 	stop chan struct{}
 	done chan struct{}
 
-	client MQTT.Client
+	//client MQTT.Client
 	topic  string
 	topica string
 	topicc string
@@ -41,26 +41,8 @@ func NewStub(s HassioMqttService) *HassioMqttServiceStub {
 	return &hms
 }
 
-func (hmss HassioMqttServiceStub) sendState() error {
-	v, err := hmss.s.Do(hmss.client)
-	if err != nil {
-		if token := hmss.client.Publish(hmss.topica, 0, false, "offline");  token.Error() != nil {
-			log.Println(token.Error())
-		}
-	} else {
-		jpl, err := json.Marshal(&v)
-		if err != nil {
-			log.Println(err)
-		} else {
-			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.Wait() && token.Error() != nil {
-				log.Println(token.Error())
-			}
-			if token := hmss.client.Publish(hmss.topica, 0, false, "online");  token.Error() != nil {
-				log.Println(token.Error())
-			}
-		}
-	}
-	return err
+func (hmss *HassioMqttServiceStub) sendState() error {
+	return nil
 }
 func (hmss *HassioMqttServiceStub) Main() {
 	hmss.s.PrepareCommandLineParams()
@@ -75,6 +57,7 @@ func (hmss *HassioMqttServiceStub) Main() {
 	var topica = flag.String("ta", fmt.Sprintf("nn/%s-aval", name), "MQTT availability topic")
 	var user = flag.String("mqtt-user", "", "MQTT user")
 	var pass = flag.String("mqtt-pass", "", "MQTT password")
+	var mqttcliid = flag.String("mqtt-client", "", "Qoverwrite default MQTT client id")
 	var debug = flag.Bool("d", false, "debug")
 	var interval = flag.Int("interval", 10, "Interval secons")
 	var failcnt = flag.Int("failcnt", 15, "Fail after n errors")
@@ -115,21 +98,25 @@ func (hmss *HassioMqttServiceStub) Main() {
 
 	// Open MQTT connection
 	opts := MQTT.NewClientOptions().AddBroker(*mqtt)
-	opts.SetClientID(fmt.Sprintf("%s-go-cli", name))
-	opts.SetKeepAlive(time.Duration(5) * time.Second)
-	opts.SetAutoReconnect(true)
+	if *mqttcliid != "" {
+		opts.SetClientID(*mqttcliid)
+	} else {
+		opts.SetClientID(fmt.Sprintf("%s-go-cli", name))
+	}
+	//opts.SetKeepAlive(time.Duration(5) * time.Second)
+	//opts.SetAutoReconnect(true)
 	if *user != "" {
 		opts.Username = *user
 		opts.Password = *pass
 	}
 
-	hmss.client = MQTT.NewClient(opts)
-	if token := hmss.client.Connect(); token.Wait() && token.Error() != nil {
+	client := MQTT.NewClient(opts)
+	if token := client.Connect(); token.Wait() && token.Error() != nil {
 		log.Panicf("MQTT Connection error: %v\n", token.Error())
 	}
 	log.Printf("MQTT Connected to %s. Topic is '%s'. Control topic is '%s'. Availability topic is '%s'\n", *mqtt, *topic, *topicc, *topica)
 
-	err := hmss.s.Init(hmss.client, *topic, *topicc, *topica, *debug, hmss.sendState)
+	err := hmss.s.Init(client, *topic, *topicc, *topica, *debug, hmss.sendState)
 	if err != nil {
 		log.Panicf("Service init error: %v\n", err)
 	}
@@ -146,19 +133,39 @@ func (hmss *HassioMqttServiceStub) Main() {
 				log.Printf("Fail limit reached (%d). Exiting.\n", actfail)
 				return
 			}
-			err := hmss.sendState()
-			if err == nil {
-				actfail = 0
+			//err := hmss.sendState()
+			//if err == nil {
+			//	actfail = 0
+			//} else {
+			//	actfail++
+			//}
+			v, err := hmss.s.Do()
+			if err != nil {
+				if token := client.Publish(hmss.topica, 0, false, "offline");  token.Error() != nil {
+					log.Println(token.Error())
+				}
 			} else {
-				actfail++
+				jpl, err := json.Marshal(&v)
+				if err != nil {
+					log.Println(err)
+				} else {
+					if token := client.Publish(hmss.topic, 0, false, jpl); token.Wait() && token.Error() != nil {
+						log.Println(token.Error())
+					}
+					if token := client.Publish(hmss.topica, 0, false, "online");  token.Error() != nil {
+						log.Println(token.Error())
+					}
+				}
 			}
+			//return err
 		}
 	}
 
 	if err := hmss.s.Close(); err != nil {
 		log.Println(err)
 	}
-	hmss.client.Disconnect(3000)
+	log.Println("Disconnecting")
+	client.Disconnect(3000)
 
 	hmss.done <- struct{}{}
 }
