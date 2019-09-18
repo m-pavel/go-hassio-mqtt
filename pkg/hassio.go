@@ -44,7 +44,7 @@ func NewStub(s HassioMqttService) *HassioMqttServiceStub {
 func (hmss HassioMqttServiceStub) sendState() error {
 	v, err := hmss.s.Do(hmss.client)
 	if err != nil {
-		if token := hmss.client.Publish(hmss.topica, 0, false, "offline"); token.Wait() && token.Error() != nil {
+		if token := hmss.client.Publish(hmss.topica, 0, false, "offline");  token.Error() != nil {
 			log.Println(token.Error())
 		}
 	} else {
@@ -55,7 +55,7 @@ func (hmss HassioMqttServiceStub) sendState() error {
 			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.Wait() && token.Error() != nil {
 				log.Println(token.Error())
 			}
-			if token := hmss.client.Publish(hmss.topica, 0, false, "online"); token.Wait() && token.Error() != nil {
+			if token := hmss.client.Publish(hmss.topica, 0, false, "online");  token.Error() != nil {
 				log.Println(token.Error())
 			}
 		}
@@ -116,6 +116,8 @@ func (hmss *HassioMqttServiceStub) Main() {
 	// Open MQTT connection
 	opts := MQTT.NewClientOptions().AddBroker(*mqtt)
 	opts.SetClientID(fmt.Sprintf("%s-go-cli", name))
+	opts.SetKeepAlive(time.Duration(5) * time.Second)
+	opts.SetAutoReconnect(true)
 	if *user != "" {
 		opts.Username = *user
 		opts.Password = *pass
