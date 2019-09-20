@@ -59,7 +59,7 @@ func (hmss *HassioMqttServiceStub) sendState() error {
 			log.Println(err)
 		} else {
 			if hmss.trace {
-				log.Println(jpl)
+				log.Printf("MQTT Payload: %s\n", jpl)
 			}
 			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.Wait() && token.Error() != nil {
 				log.Println(token.Error())
