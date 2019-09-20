@@ -35,6 +35,7 @@ type HassioMqttServiceStub struct {
 	topic  string
 	topica string
 	topicc string
+	trace  bool
 }
 
 type SendState func() error
@@ -57,6 +58,9 @@ func (hmss *HassioMqttServiceStub) sendState() error {
 		if err != nil {
 			log.Println(err)
 		} else {
+			if hmss.trace {
+				log.Println(jpl)
+			}
 			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.Wait() && token.Error() != nil {
 				log.Println(token.Error())
 			}
@@ -84,6 +88,7 @@ func (hmss *HassioMqttServiceStub) Main() {
 	var debug = flag.Bool("d", false, "debug")
 	var interval = flag.Int("interval", 10, "Interval secons")
 	var failcnt = flag.Int("failcnt", 15, "Fail after n errors")
+	var trace = flag.Bool("trace", false, "Trace MQTT and device communication")
 	flag.Parse()
 	daemon.AddCommand(daemon.StringFlag(signal, "stop"), syscall.SIGTERM, hmss.termHandler)
 	log.SetFlags(log.Lshortfile | log.Ltime | log.Ldate)
@@ -129,6 +134,7 @@ func (hmss *HassioMqttServiceStub) Main() {
 	hmss.topic = *topic
 	hmss.topica = *topica
 	hmss.topicc = *topicc
+	hmss.trace = *trace
 	// Open MQTT connection
 	opts := MQTT.NewClientOptions().AddBroker(*mqtt)
 	if *mqttcliid != "" {
