@@ -2,12 +2,17 @@ package ghm
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"syscall"
 	"time"
+
+	"crypto/tls"
+	"crypto/x509"
+	"io/ioutil"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	"github.com/sevlyar/go-daemon"
@@ -84,7 +89,8 @@ func (hmss *HassioMqttServiceStub) Main() {
 	var topica = flag.String("ta", fmt.Sprintf("nn/%s-aval", name), "MQTT availability topic")
 	var user = flag.String("mqtt-user", "", "MQTT user")
 	var pass = flag.String("mqtt-pass", "", "MQTT password")
-	var mqttcliid = flag.String("mqtt-client", "", "Qoverwrite default MQTT client id")
+	var mqttcliid = flag.String("mqtt-client", "", "Overwrite default MQTT client id")
+	var mqttca = flag.String("mqtt-ca", "", "MQTT CA certificate")
 	var debug = flag.Bool("d", false, "debug")
 	var interval = flag.Int("interval", 10, "Interval secons")
 	var failcnt = flag.Int("failcnt", 15, "Fail after n errors")
@@ -93,6 +99,7 @@ func (hmss *HassioMqttServiceStub) Main() {
 	daemon.AddCommand(daemon.StringFlag(signal, "stop"), syscall.SIGTERM, hmss.termHandler)
 	log.SetFlags(log.Lshortfile | log.Ltime | log.Ldate)
 
+	hmss.trace = *trace
 	if *debug {
 		//MQTT.DEBUG = log.New(os.Stderr, "MQTT DEBUG    ", log.Ltime|log.Lshortfile)
 	}
@@ -131,33 +138,13 @@ func (hmss *HassioMqttServiceStub) Main() {
 		}
 	}
 
-	hmss.topic = *topic
-	hmss.topica = *topica
-	hmss.topicc = *topicc
-	hmss.trace = *trace
-	// Open MQTT connection
-	opts := MQTT.NewClientOptions().AddBroker(*mqtt)
-	if *mqttcliid != "" {
-		opts.SetClientID(*mqttcliid)
-	} else {
-		opts.SetClientID(fmt.Sprintf("%s-go-cli", name))
+	if *mqttcliid == "" {
+		*mqttcliid = fmt.Sprintf("%s-go-cli", name)
 	}
 
-	if *user != "" {
-		opts.Username = *user
-		opts.Password = *pass
+	if err := hmss.setupMqtt(*topic, *topica, *topicc, *mqtt, *mqttcliid, *user, *pass, *mqttca); err != nil {
+		log.Panicf("MQTT Connection error: %v\n", err)
 	}
-
-	opts.WillEnabled = true
-	opts.WillPayload = []byte(offline)
-	opts.WillTopic = *topica
-	opts.WillRetained = true
-
-	hmss.client = MQTT.NewClient(opts)
-	if token := hmss.client.Connect(); token.Wait() && token.Error() != nil {
-		log.Panicf("MQTT Connection error: %v\n", token.Error())
-	}
-	log.Printf("MQTT Connected to %s. Topic is '%s'. Control topic is '%s'. Availability topic is '%s'\n", *mqtt, *topic, *topicc, *topica)
 
 	err := hmss.s.Init(hmss.client, *topic, *topicc, *topica, *debug, hmss.sendState)
 	if err != nil {
@@ -193,6 +180,48 @@ func (hmss *HassioMqttServiceStub) Main() {
 	hmss.client.Disconnect(3000)
 
 	hmss.done <- struct{}{}
+}
+
+func (hmss *HassioMqttServiceStub) setupMqtt(topic, topica, topicc, mqtt, mqttcli, mqttuser, mqttpass, mqttca string) error {
+	hmss.topic = topic
+	hmss.topica = topica
+	hmss.topicc = topicc
+
+	// Open MQTT connection
+	opts := MQTT.NewClientOptions().AddBroker(mqtt)
+
+	opts.SetClientID(mqttcli)
+
+	if mqttuser != "" {
+		opts.Username = mqttuser
+		opts.Password = mqttpass
+	}
+
+	if mqttca != "" {
+		tlscfg := tls.Config{}
+		tlscfg.RootCAs = x509.NewCertPool()
+		var b []byte
+		var err error
+		if b, err = ioutil.ReadFile(mqttca); err != nil {
+			return err
+		}
+		if ok := tlscfg.RootCAs.AppendCertsFromPEM(b); !ok {
+			return errors.New("failed to parse root certificate")
+		}
+		opts.SetTLSConfig(&tlscfg)
+	}
+
+	opts.WillEnabled = true
+	opts.WillPayload = []byte(offline)
+	opts.WillTopic = topica
+	opts.WillRetained = true
+
+	hmss.client = MQTT.NewClient(opts)
+	if token := hmss.client.Connect(); token.Wait() && token.Error() != nil {
+		return token.Error()
+	}
+	log.Printf("MQTT Connected to %s. Topic is '%s'. Control topic is '%s'. Availability topic is '%s'\n", mqtt, topic, topicc, topica)
+	return nil
 }
 
 func (hmss HassioMqttServiceStub) termHandler(sig os.Signal) error {
