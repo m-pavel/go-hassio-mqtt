@@ -45,7 +45,7 @@ func main() {
 	if *mqttca != "" {
 		tlscfg := tls.Config{}
 		tlscfg.RootCAs = x509.NewCertPool()
-		b, err := ioutil.ReadFile("ca.crt")
+		b, err := ioutil.ReadFile(*mqttca)
 		if err != nil {
 			log.Fatal(err)
 		}
