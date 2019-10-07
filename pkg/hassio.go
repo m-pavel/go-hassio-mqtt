@@ -165,6 +165,7 @@ func (hmss *HassioMqttServiceStub) Main() {
 			}
 			err := hmss.sendState()
 			if err == nil {
+				log.Println(err)
 				actfail = 0
 			} else {
 				actfail++
