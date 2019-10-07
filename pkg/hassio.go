@@ -167,7 +167,7 @@ func (hmss *HassioMqttServiceStub) Main() {
 			if err == nil {
 				actfail = 0
 			} else {
-				log.Println(err)
+				log.Printf("[%d] %v\n", actfail, err)
 				actfail++
 			}
 
