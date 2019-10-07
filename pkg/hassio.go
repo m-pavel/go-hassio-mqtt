@@ -192,6 +192,8 @@ func (hmss *HassioMqttServiceStub) setupMqtt(topic, topica, topicc, mqtt, mqttcl
 	opts := MQTT.NewClientOptions().AddBroker(mqtt)
 
 	opts.SetClientID(mqttcli)
+	opts.SetAutoReconnect(true)
+	opts.SetConnectRetry(true)
 
 	if mqttuser != "" {
 		opts.Username = mqttuser
