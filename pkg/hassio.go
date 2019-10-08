@@ -92,6 +92,7 @@ func (hmss *HassioMqttServiceStub) Main() {
 	var mqttcliid = flag.String("mqtt-client", "", "Overwrite default MQTT client id")
 	var mqttca = flag.String("mqtt-ca", "", "MQTT CA certificate")
 	var debug = flag.Bool("d", false, "debug")
+	var mqttdebug = flag.Bool("md", false, "MQTT debug")
 	var interval = flag.Int("interval", 10, "Interval secons")
 	var failcnt = flag.Int("failcnt", 15, "Fail after n errors")
 	var trace = flag.Bool("trace", false, "Trace MQTT and device communication")
@@ -100,8 +101,8 @@ func (hmss *HassioMqttServiceStub) Main() {
 	log.SetFlags(log.Lshortfile | log.Ltime | log.Ldate)
 
 	hmss.trace = *trace
-	if *debug {
-		//MQTT.DEBUG = log.New(os.Stderr, "MQTT DEBUG    ", log.Ltime|log.Lshortfile)
+	if *mqttdebug {
+		MQTT.DEBUG = log.New(os.Stderr, "MQTT DEBUG    ", log.Ltime|log.Lshortfile)
 	}
 	MQTT.WARN = log.New(os.Stderr, "MQTT WARNING  ", log.Ltime|log.Lshortfile)
 	MQTT.CRITICAL = log.New(os.Stderr, "MQTT CRITICAL ", log.Ltime|log.Lshortfile)
