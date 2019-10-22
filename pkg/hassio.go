@@ -21,6 +21,7 @@ import (
 const (
 	online  = "online"
 	offline = "offline"
+	timeout = time.Second * 5
 )
 
 type HassioMqttService interface {
@@ -55,7 +56,7 @@ func NewStub(s HassioMqttService) *HassioMqttServiceStub {
 func (hmss *HassioMqttServiceStub) sendState() error {
 	v, err := hmss.s.Do()
 	if err != nil {
-		if token := hmss.client.Publish(hmss.topica, 0, false, offline); token.Error() != nil {
+		if token := hmss.client.Publish(hmss.topica, 0, false, offline); token.WaitTimeout(timeout) && token.Error() != nil {
 			log.Println(token.Error())
 		}
 	} else {
@@ -66,10 +67,10 @@ func (hmss *HassioMqttServiceStub) sendState() error {
 			if hmss.trace {
 				log.Printf("MQTT Payload: %s\n", jpl)
 			}
-			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.Wait() && token.Error() != nil {
+			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.WaitTimeout(timeout) && token.Error() != nil {
 				log.Println(token.Error())
 			}
-			if token := hmss.client.Publish(hmss.topica, 0, false, online); token.Error() != nil {
+			if token := hmss.client.Publish(hmss.topica, 0, false, online); token.WaitTimeout(timeout) && token.Error() != nil {
 				log.Println(token.Error())
 			}
 		}
@@ -221,7 +222,7 @@ func (hmss *HassioMqttServiceStub) setupMqtt(topic, topica, topicc, mqtt, mqttcl
 	opts.WillRetained = true
 
 	hmss.client = MQTT.NewClient(opts)
-	if token := hmss.client.Connect(); token.Wait() && token.Error() != nil {
+	if token := hmss.client.Connect(); token.WaitTimeout(timeout) &&  token.Error() != nil {
 		return token.Error()
 	}
 	log.Printf("MQTT Connected to %s. Topic is '%s'. Control topic is '%s'. Availability topic is '%s'\n", mqtt, topic, topicc, topica)
