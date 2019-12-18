@@ -33,6 +33,13 @@ type HassioMqttService interface {
 	OnConnect(client MQTT.Client, topic, topicc, topica string)
 }
 
+type NonListerningService struct {
+}
+
+func (nn NonListerningService) OnConnect(client MQTT.Client, topic, topicc, topica string) {
+	// nothing here
+}
+
 type HassioMqttServiceStub struct {
 	s    HassioMqttService
 	stop chan struct{}
