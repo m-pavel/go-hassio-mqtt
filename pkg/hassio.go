@@ -27,9 +27,10 @@ const (
 type HassioMqttService interface {
 	PrepareCommandLineParams()
 	Name() string
-	Init(client MQTT.Client, topic, topicc, topica string, debug bool, ss SendState) error
+	Init(sc *ServiceContext) error
 	Do() (interface{}, error)
 	Close() error
+	OnConnect(client MQTT.Client, topic, topicc, topica string)
 }
 
 type HassioMqttServiceStub struct {
@@ -42,10 +43,29 @@ type HassioMqttServiceStub struct {
 	topica string
 	topicc string
 	trace  bool
+	debug  *bool
 }
 
-type SendState func() error
+type ServiceContext struct {
+	stub *HassioMqttServiceStub
+}
 
+func (sc *ServiceContext) SendState() error {
+	return sc.stub.sendState()
+}
+
+func (sc ServiceContext) Debug() bool {
+	return *sc.stub.debug
+}
+func (sc ServiceContext) Topic() string {
+	return sc.stub.topic
+}
+func (sc ServiceContext) ControlTopic() string {
+	return sc.stub.topicc
+}
+func (sc ServiceContext) AvailabilityTopic() string {
+	return sc.stub.topica
+}
 func NewStub(s HassioMqttService) *HassioMqttServiceStub {
 	hms := HassioMqttServiceStub{s: s}
 	hms.done = make(chan struct{})
@@ -92,7 +112,7 @@ func (hmss *HassioMqttServiceStub) Main() {
 	var pass = flag.String("mqtt-pass", "", "MQTT password")
 	var mqttcliid = flag.String("mqtt-client", "", "Overwrite default MQTT client id")
 	var mqttca = flag.String("mqtt-ca", "", "MQTT CA certificate")
-	var debug = flag.Bool("d", false, "debug")
+	hmss.debug = flag.Bool("d", false, "debug")
 	var mqttdebug = flag.Bool("md", false, "MQTT debug")
 	var interval = flag.Int("interval", 10, "Interval secons")
 	var failcnt = flag.Int("failcnt", 15, "Fail after n errors")
@@ -125,7 +145,9 @@ func (hmss *HassioMqttServiceStub) Main() {
 		if err != nil {
 			log.Fatalf("Unable send signal to the daemon: %v", err)
 		}
-		daemon.SendCommands(d)
+		if err := daemon.SendCommands(d); err != nil {
+			log.Println(err)
+		}
 		return
 	}
 
@@ -148,18 +170,19 @@ func (hmss *HassioMqttServiceStub) Main() {
 		log.Panicf("MQTT Connection error: %v\n", err)
 	}
 
-	err := hmss.s.Init(hmss.client, *topic, *topicc, *topica, *debug, hmss.sendState)
+	ctx := ServiceContext{stub: hmss}
+	err := hmss.s.Init(&ctx)
 	if err != nil {
 		log.Panicf("Service init error: %v\n", err)
 	}
 	actfail := 0
 
 	log.Printf("Starting main loop with %d s. interval.\n", *interval)
-	for {
+	for exit := true; exit; {
 		select {
 		case <-hmss.stop:
 			log.Println("Exiting because of signal.")
-			break
+			exit = false
 		case <-time.After(time.Duration(*interval) * time.Second):
 			if *failcnt > 0 && actfail >= *failcnt {
 				log.Printf("Fail limit reached (%d). Exiting.\n", actfail)
@@ -172,7 +195,6 @@ func (hmss *HassioMqttServiceStub) Main() {
 				log.Printf("[%d] %v\n", actfail, err)
 				actfail++
 			}
-
 		}
 	}
 
@@ -196,6 +218,9 @@ func (hmss *HassioMqttServiceStub) setupMqtt(topic, topica, topicc, mqtt, mqttcl
 	opts.SetClientID(mqttcli)
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
+	opts.OnConnect = func(c MQTT.Client) {
+		hmss.s.OnConnect(c, topic, topicc, topica)
+	}
 
 	if mqttuser != "" {
 		opts.Username = mqttuser
@@ -222,7 +247,7 @@ func (hmss *HassioMqttServiceStub) setupMqtt(topic, topica, topicc, mqtt, mqttcl
 	opts.WillRetained = true
 
 	hmss.client = MQTT.NewClient(opts)
-	if token := hmss.client.Connect(); token.WaitTimeout(timeout) &&  token.Error() != nil {
+	if token := hmss.client.Connect(); token.WaitTimeout(timeout) && token.Error() != nil {
 		return token.Error()
 	}
 	log.Printf("MQTT Connected to %s. Topic is '%s'. Control topic is '%s'. Availability topic is '%s'\n", mqtt, topic, topicc, topica)

@@ -35,7 +35,7 @@ func main() {
 	if *mqttcliid != "" {
 		opts.SetClientID(*mqttcliid)
 	} else {
-		opts.SetClientID("mqtt-go-client-5")
+		opts.SetClientID("mqtt-go-client-6")
 	}
 
 	if *user != "" {
