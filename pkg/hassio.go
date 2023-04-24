@@ -1,21 +1,17 @@
 package ghm
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"os"
-	"syscall"
 	"time"
 
-	"crypto/tls"
-	"crypto/x509"
-	"io/ioutil"
-
 	MQTT "github.com/eclipse/paho.mqtt.golang"
-	"github.com/sevlyar/go-daemon"
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -24,222 +20,105 @@ const (
 	timeout = time.Second * 5
 )
 
-type HassioMqttService interface {
-	PrepareCommandLineParams()
-	Name() string
-	Init(sc *ServiceContext) error
-	Do() (interface{}, error)
-	Close() error
-	OnConnect(client MQTT.Client, topic, topicc, topica string)
-}
-
-type NonListerningService struct {
-}
-
-func (nn NonListerningService) OnConnect(client MQTT.Client, topic, topicc, topica string) {
-	// nothing here
-}
-
-type HassioMqttServiceStub struct {
-	s    HassioMqttService
-	stop chan struct{}
-	done chan struct{}
+type HassioConsumer[R any] struct {
+	host     string
+	topic    string
+	topicc   string
+	topica   string
+	user     string
+	password string
+	cliId    string
+	ca       string //file
+	name     string
 
 	client MQTT.Client
-	topic  string
-	topica string
-	topicc string
-	trace  bool
-	debug  *bool
+
+	Converter func(R) any
 }
 
-type ServiceContext struct {
-	stub *HassioMqttServiceStub
-}
+func (hc *HassioConsumer[R]) Setup(cmd *cobra.Command, name string) {
+	// cmd.PersistentFlags().IntVar(&mc.period, "period", 60, "Period minutes")
 
-func (sc *ServiceContext) SendState() error {
-	return sc.stub.sendState()
+	cmd.PersistentFlags().StringVar(&hc.host, "mqtt", "tcp://localhost:1883", "MQTT endpoint")
+	cmd.PersistentFlags().StringVar(&hc.host, "t", fmt.Sprintf("nn/%s", name), "MQTT topic")
+	cmd.PersistentFlags().StringVar(&hc.host, "tc", fmt.Sprintf("nn/%s-control", name), "MQTT control topic")
+	cmd.PersistentFlags().StringVar(&hc.host, "ta", fmt.Sprintf("nn/%s-aval", name), "MQTT availability topic")
+	cmd.PersistentFlags().StringVar(&hc.host, "mqtt-user", "", "MQTT user")
+	cmd.PersistentFlags().StringVar(&hc.host, "mqtt-pass", "", "MQTT password")
+	cmd.PersistentFlags().StringVar(&hc.host, "mqtt-client", "", "Overwrite default MQTT client id")
+	cmd.PersistentFlags().StringVar(&hc.host, "mqtt-ca", "", "MQTT CA certificate file")
+	hc.name = name
 }
-
-func (sc ServiceContext) Debug() bool {
-	return *sc.stub.debug
-}
-func (sc ServiceContext) Topic() string {
-	return sc.stub.topic
-}
-func (sc ServiceContext) ControlTopic() string {
-	return sc.stub.topicc
-}
-func (sc ServiceContext) AvailabilityTopic() string {
-	return sc.stub.topica
-}
-func NewStub(s HassioMqttService) *HassioMqttServiceStub {
-	hms := HassioMqttServiceStub{s: s}
-	hms.done = make(chan struct{})
-	hms.stop = make(chan struct{})
-	return &hms
-}
-
-func (hmss *HassioMqttServiceStub) sendState() error {
-	v, err := hmss.s.Do()
-	if err != nil {
-		if token := hmss.client.Publish(hmss.topica, 0, false, offline); token.WaitTimeout(timeout) && token.Error() != nil {
-			log.Println(token.Error())
-		}
-	} else {
-		jpl, err := json.Marshal(&v)
-		if err != nil {
-			log.Println(err)
-		} else {
-			if hmss.trace {
-				log.Printf("MQTT Payload: %s\n", jpl)
-			}
-			if token := hmss.client.Publish(hmss.topic, 1, false, jpl); token.WaitTimeout(timeout) && token.Error() != nil {
-				log.Println(token.Error())
-			}
-			if token := hmss.client.Publish(hmss.topica, 0, false, online); token.WaitTimeout(timeout) && token.Error() != nil {
-				log.Println(token.Error())
-			}
-		}
-	}
-	return err
-}
-func (hmss *HassioMqttServiceStub) Main() {
-	hmss.s.PrepareCommandLineParams()
-	name := hmss.s.Name()
-	var logf = flag.String("log", fmt.Sprintf("%s.log", name), "log")
-	var pid = flag.String("pid", fmt.Sprintf("%s.pid", name), "pid")
-	var notdaemonize = flag.Bool("n", false, "Do not do to background.")
-	var signal = flag.String("s", "", `send signal to the daemon stop — shutdown`)
-	var mqtt = flag.String("mqtt", "tcp://localhost:1883", "MQTT endpoint")
-	var topic = flag.String("t", fmt.Sprintf("nn/%s", name), "MQTT topic")
-	var topicc = flag.String("tc", fmt.Sprintf("nn/%s-control", name), "MQTT control topic")
-	var topica = flag.String("ta", fmt.Sprintf("nn/%s-aval", name), "MQTT availability topic")
-	var user = flag.String("mqtt-user", "", "MQTT user")
-	var pass = flag.String("mqtt-pass", "", "MQTT password")
-	var mqttcliid = flag.String("mqtt-client", "", "Overwrite default MQTT client id")
-	var mqttca = flag.String("mqtt-ca", "", "MQTT CA certificate")
-	hmss.debug = flag.Bool("d", false, "debug")
-	var mqttdebug = flag.Bool("md", false, "MQTT debug")
-	var interval = flag.Int("interval", 10, "Interval secons")
-	var failcnt = flag.Int("failcnt", 15, "Fail after n errors")
-	var trace = flag.Bool("trace", false, "Trace MQTT and device communication")
-	flag.Parse()
-	daemon.AddCommand(daemon.StringFlag(signal, "stop"), syscall.SIGTERM, hmss.termHandler)
-	log.SetFlags(log.Lshortfile | log.Ltime | log.Ldate)
-
-	hmss.trace = *trace
-	if *mqttdebug {
+func (hc *HassioConsumer[R]) Init(debug bool) error {
+	if debug {
 		MQTT.DEBUG = log.New(os.Stderr, "MQTT DEBUG    ", log.Ltime|log.Lshortfile)
 	}
 	MQTT.WARN = log.New(os.Stderr, "MQTT WARNING  ", log.Ltime|log.Lshortfile)
 	MQTT.CRITICAL = log.New(os.Stderr, "MQTT CRITICAL ", log.Ltime|log.Lshortfile)
 	MQTT.ERROR = log.New(os.Stderr, "MQTT ERROR    ", log.Ltime|log.Lshortfile)
 
-	cntxt := &daemon.Context{
-		PidFileName: *pid,
-		PidFilePerm: 0644,
-		LogFileName: *logf,
-		LogFilePerm: 0640,
-		WorkDir:     "/tmp",
-		Umask:       027,
-		Args:        os.Args,
+	if hc.cliId == "" {
+		hc.cliId = fmt.Sprintf("%s-go-cli", hc.name)
 	}
 
-	// Send signal if passed
-	if !*notdaemonize && len(daemon.ActiveFlags()) > 0 {
-		d, err := cntxt.Search()
-		if err != nil {
-			log.Fatalf("Unable send signal to the daemon: %v", err)
-		}
-		if err := daemon.SendCommands(d); err != nil {
-			log.Println(err)
-		}
-		return
-	}
-
-	// Daemonize
-	if !*notdaemonize {
-		d, err := cntxt.Reborn()
-		if err != nil {
-			log.Fatal(err)
-		}
-		if d != nil {
-			return
-		}
-	}
-
-	if *mqttcliid == "" {
-		*mqttcliid = fmt.Sprintf("%s-go-cli", name)
-	}
-
-	if err := hmss.setupMqtt(*topic, *topica, *topicc, *mqtt, *mqttcliid, *user, *pass, *mqttca); err != nil {
+	if err := hc.setupMqtt(); err != nil {
 		log.Panicf("MQTT Connection error: %v\n", err)
 	}
-
-	ctx := ServiceContext{stub: hmss}
-	err := hmss.s.Init(&ctx)
-	if err != nil {
-		log.Panicf("Service init error: %v\n", err)
+	if hc.Converter == nil {
+		hc.Converter = func(r R) any {
+			return r
+		}
 	}
-	actfail := 0
+	return nil
+}
+func (hc *HassioConsumer[R]) Consume(v R) error {
 
-	log.Printf("Starting main loop with %d s. interval.\n", *interval)
-	for exit := true; exit; {
-		select {
-		case <-hmss.stop:
-			log.Println("Exiting because of signal.")
-			exit = false
-		case <-time.After(time.Duration(*interval) * time.Second):
-			if *failcnt > 0 && actfail >= *failcnt {
-				log.Printf("Fail limit reached (%d). Exiting.\n", actfail)
-				return
-			}
-			err := hmss.sendState()
-			if err == nil {
-				actfail = 0
-			} else {
-				log.Printf("[%d] %v\n", actfail, err)
-				actfail++
-			}
+	jpl, err := json.Marshal(hc.Converter(v))
+	if err != nil {
+		log.Println(err)
+	} else {
+		// if hmss.trace {
+		// 	log.Printf("MQTT Payload: %s\n", jpl)
+		// }
+		if token := hc.client.Publish(hc.topic, 1, false, jpl); token.WaitTimeout(timeout) && token.Error() != nil {
+			log.Println(token.Error())
+		}
+		if token := hc.client.Publish(hc.topica, 0, false, online); token.WaitTimeout(timeout) && token.Error() != nil {
+			log.Println(token.Error())
 		}
 	}
 
-	if err := hmss.s.Close(); err != nil {
-		log.Println(err)
-	}
-	log.Println("Disconnecting")
-	hmss.client.Disconnect(3000)
-
-	hmss.done <- struct{}{}
+	return nil
 }
 
-func (hmss *HassioMqttServiceStub) setupMqtt(topic, topica, topicc, mqtt, mqttcli, mqttuser, mqttpass, mqttca string) error {
-	hmss.topic = topic
-	hmss.topica = topica
-	hmss.topicc = topicc
+func (hc *HassioConsumer[R]) Close() error {
+	hc.client.Disconnect(3000)
+	return nil
+}
 
+func (hc *HassioConsumer[R]) setupMqtt() error {
 	// Open MQTT connection
-	opts := MQTT.NewClientOptions().AddBroker(mqtt)
+	opts := MQTT.NewClientOptions().AddBroker(hc.host)
 
-	opts.SetClientID(mqttcli)
+	opts.SetClientID(hc.cliId)
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
 	opts.OnConnect = func(c MQTT.Client) {
-		hmss.s.OnConnect(c, topic, topicc, topica)
+		// TODO
+		//	hc.s.OnConnect(c, hc.topic, hc.topicc, hc.topica)
 	}
 
-	if mqttuser != "" {
-		opts.Username = mqttuser
-		opts.Password = mqttpass
+	if hc.user != "" {
+		opts.Username = hc.user
+		opts.Password = hc.password
 	}
 
-	if mqttca != "" {
+	if hc.ca != "" {
 		tlscfg := tls.Config{}
 		tlscfg.RootCAs = x509.NewCertPool()
 		var b []byte
 		var err error
-		if b, err = ioutil.ReadFile(mqttca); err != nil {
+		if b, err = os.ReadFile(hc.ca); err != nil {
 			return err
 		}
 		if ok := tlscfg.RootCAs.AppendCertsFromPEM(b); !ok {
@@ -250,22 +129,13 @@ func (hmss *HassioMqttServiceStub) setupMqtt(topic, topica, topicc, mqtt, mqttcl
 
 	opts.WillEnabled = true
 	opts.WillPayload = []byte(offline)
-	opts.WillTopic = topica
+	opts.WillTopic = hc.topica
 	opts.WillRetained = true
 
-	hmss.client = MQTT.NewClient(opts)
-	if token := hmss.client.Connect(); token.WaitTimeout(timeout) && token.Error() != nil {
+	hc.client = MQTT.NewClient(opts)
+	if token := hc.client.Connect(); token.WaitTimeout(timeout) && token.Error() != nil {
 		return token.Error()
 	}
-	log.Printf("MQTT Connected to %s. Topic is '%s'. Control topic is '%s'. Availability topic is '%s'\n", mqtt, topic, topicc, topica)
+	log.Printf("MQTT Connected to %s. Topic is '%s'. Control topic is '%s'. Availability topic is '%s'\n", hc.host, hc.topic, hc.topicc, hc.topica)
 	return nil
-}
-
-func (hmss HassioMqttServiceStub) termHandler(sig os.Signal) error {
-	log.Println("terminating...")
-	hmss.stop <- struct{}{}
-	if sig == syscall.SIGQUIT {
-		<-hmss.done
-	}
-	return daemon.ErrStop
 }
