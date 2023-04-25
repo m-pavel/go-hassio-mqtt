@@ -3,6 +3,7 @@ package ghm
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 
@@ -16,16 +17,19 @@ type HttpServer[R any] struct {
 
 	mem MemoryConsumer[R]
 
-	Converter func(R) any
+	Converter    func(R) any
+	indexContent *template.Template
+	name         string
 }
 
 func (ht *HttpServer[R]) Setup(cmd *cobra.Command, name string) {
 	cmd.PersistentFlags().IntVar(&ht.port, "port", 2999, "Http port")
 	ht.mem = MemoryConsumer[R]{}
 	ht.mem.Setup(cmd, name)
+	ht.name = name
 }
-func (ht *HttpServer[R]) Init(d bool) error {
 
+func (ht *HttpServer[R]) Init(d bool) error {
 	ht.mem.Init(d)
 
 	if ht.Converter == nil {
@@ -43,11 +47,16 @@ func (ht *HttpServer[R]) Init(d bool) error {
 	}
 
 	go func() {
-		// service connections
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
+
+	ht.indexContent = template.New("index")
+	var err error
+	if ht.indexContent, err = ht.indexContent.Parse(index_html); err != nil {
+		return err
+	}
 	return nil
 }
 func (ht *HttpServer[R]) Consume(v R) error {
@@ -57,15 +66,16 @@ func (ht *HttpServer[R]) Close() error {
 	return ht.mem.Close()
 }
 
-func (ls *HttpServer[R]) current(c *gin.Context) {
+func (ht *HttpServer[R]) current(c *gin.Context) {
 	c.Writer.Header().Add("Content-type", "application/json")
-	json.NewEncoder(c.Writer).Encode(ls.Converter(ls.mem.Last()))
+	json.NewEncoder(c.Writer).Encode(ht.Converter(ht.mem.Last()))
 }
 
-func (ls *HttpServer[R]) data(c *gin.Context) {
-
+func (ht *HttpServer[R]) data(c *gin.Context) {
+	c.Writer.Header().Add("Content-type", "application/json")
+	json.NewEncoder(c.Writer).Encode(ht.mem.Data())
 }
 
-func (ls *HttpServer[R]) index(c *gin.Context) {
-
+func (ht *HttpServer[R]) index(c *gin.Context) {
+	ht.indexContent.Execute(c.Writer, &IndexModel{Yaxis: ht.name})
 }

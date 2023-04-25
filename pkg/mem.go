@@ -3,6 +3,7 @@ package ghm
 import (
 	"context"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -18,6 +19,11 @@ type MemoryConsumer[R any] struct {
 	last  R
 
 	cleanup context.CancelFunc
+}
+
+type Entry struct {
+	Timestamp int64 `json:"ts"`
+	Value     any   `json:"value"`
 }
 
 func (mc *MemoryConsumer[R]) Setup(cmd *cobra.Command, name string) {
@@ -72,4 +78,21 @@ func (mc *MemoryConsumer[R]) clearCache() {
 
 func (mc MemoryConsumer[R]) Last() R {
 	return mc.last
+}
+
+func (mc MemoryConsumer[R]) Data(c ...func(R) any) []*Entry {
+	var conv func(R) any
+	if len(c) == 1 {
+		conv = c[0]
+	} else {
+		conv = func(r R) any { return r }
+	}
+	mc.lock.Lock()
+	defer mc.lock.Unlock()
+	res := []*Entry{}
+	for k, v := range mc.cache {
+		res = append(res, &Entry{Timestamp: k, Value: conv(v)})
+	}
+	sort.Slice(res, func(i, j int) bool { return res[i].Timestamp < res[j].Timestamp })
+	return res
 }
