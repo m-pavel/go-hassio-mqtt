@@ -21,10 +21,7 @@ type MemoryConsumer[R any] struct {
 	cleanup context.CancelFunc
 }
 
-type Entry struct {
-	Timestamp int64 `json:"ts"`
-	Value     any   `json:"value"`
-}
+type Entry map[string]any
 
 func (mc *MemoryConsumer[R]) Setup(cmd *cobra.Command, name string) {
 	cmd.PersistentFlags().IntVar(&mc.period, "period", 60, "Period minutes")
@@ -80,19 +77,21 @@ func (mc MemoryConsumer[R]) Last() R {
 	return mc.last
 }
 
-func (mc MemoryConsumer[R]) Data(c ...func(R) any) []*Entry {
-	var conv func(R) any
+func (mc MemoryConsumer[R]) Data(c ...func(R) Entry) []Entry {
+	var conv func(R) Entry
 	if len(c) == 1 {
 		conv = c[0]
 	} else {
-		conv = func(r R) any { return r }
+		conv = func(r R) Entry { return Entry{"value": r} }
 	}
 	mc.lock.Lock()
 	defer mc.lock.Unlock()
-	res := []*Entry{}
+	res := []Entry{}
 	for k, v := range mc.cache {
-		res = append(res, &Entry{Timestamp: k, Value: conv(v)})
+		cv := conv(v)
+		cv["ts"] = k
+		res = append(res, cv)
 	}
-	sort.Slice(res, func(i, j int) bool { return res[i].Timestamp < res[j].Timestamp })
+	sort.Slice(res, func(i, j int) bool { return res[i]["ts"].(int64) < res[j]["ts"].(int64) })
 	return res
 }

@@ -6,5 +6,5 @@ import (
 )
 
 func main() {
-	ghm.NewExecutor[float64]("sample", &sample.RandomProducer{}, &ghm.HttpServer[float64]{Converter: sample.FloatConverter}).Main()
+	ghm.NewExecutor[float64]("sample", &sample.RandomProducer{}, &ghm.HttpServer[float64]{ToJsonConverter: sample.FloatConverter}).Main()
 }

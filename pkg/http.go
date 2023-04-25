@@ -17,9 +17,11 @@ type HttpServer[R any] struct {
 
 	mem MemoryConsumer[R]
 
-	Converter    func(R) any
-	indexContent *template.Template
-	name         string
+	ToJsonConverter func(R) any
+	ToRawConverter  func(R) Entry
+	YAxis           []string
+	indexContent    *template.Template
+	name            string
 }
 
 func (ht *HttpServer[R]) Setup(cmd *cobra.Command, name string) {
@@ -32,11 +34,20 @@ func (ht *HttpServer[R]) Setup(cmd *cobra.Command, name string) {
 func (ht *HttpServer[R]) Init(d bool) error {
 	ht.mem.Init(d)
 
-	if ht.Converter == nil {
-		ht.Converter = func(r R) any {
+	if ht.ToJsonConverter == nil {
+		ht.ToJsonConverter = func(r R) any {
 			return r
 		}
 	}
+	if ht.ToRawConverter == nil {
+		ht.ToRawConverter = func(r R) Entry {
+			return Entry{"value": r}
+		}
+	}
+	if ht.YAxis == nil {
+		ht.YAxis = []string{"value"}
+	}
+
 	ht.engine = gin.Default()
 	ht.engine.GET("/api/v1/current", ht.current)
 	ht.engine.GET("/api/v1/data", ht.data)
@@ -68,14 +79,14 @@ func (ht *HttpServer[R]) Close() error {
 
 func (ht *HttpServer[R]) current(c *gin.Context) {
 	c.Writer.Header().Add("Content-type", "application/json")
-	json.NewEncoder(c.Writer).Encode(ht.Converter(ht.mem.Last()))
+	json.NewEncoder(c.Writer).Encode(ht.ToJsonConverter(ht.mem.Last()))
 }
 
 func (ht *HttpServer[R]) data(c *gin.Context) {
 	c.Writer.Header().Add("Content-type", "application/json")
-	json.NewEncoder(c.Writer).Encode(ht.mem.Data())
+	json.NewEncoder(c.Writer).Encode(ht.mem.Data(ht.ToRawConverter))
 }
 
 func (ht *HttpServer[R]) index(c *gin.Context) {
-	ht.indexContent.Execute(c.Writer, &IndexModel{Yaxis: ht.name})
+	ht.indexContent.Execute(c.Writer, &IndexModel{Yaxis: ht.name, Marks: ht.YAxis})
 }
