@@ -63,7 +63,7 @@ func NewExecutor[R any](name string, p Producer[R], c ...Consumer[R]) Executor {
 	}
 	e.rootCmd.AddCommand(versionCmd)
 	e.rootCmd.AddCommand(stopCmd)
-	e.rootCmd.PersistentFlags().StringVar(&e.log, "log", fmt.Sprintf("%s.log", name), "Log file")
+	e.rootCmd.PersistentFlags().StringVar(&e.log, "log", "", "Log file")
 	e.rootCmd.PersistentFlags().StringVar(&e.pid, "pid", fmt.Sprintf("%s.pid", name), "Pid file")
 	e.rootCmd.PersistentFlags().BoolVarP(&e.notdaemonize, "not-daemon", "n", false, "Do not go to background")
 	e.rootCmd.PersistentFlags().StringVar(&e.daemonWd, "daemon-workdir", "/tmp", "Daemon work dir")
