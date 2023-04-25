@@ -34,21 +34,21 @@ type HassioConsumer[R any] struct {
 	client MQTT.Client
 
 	Converter func(R) any
+	OnConnect func(client MQTT.Client, topic, topicc, topica string)
 }
 
 func (hc *HassioConsumer[R]) Setup(cmd *cobra.Command, name string) {
-	// cmd.PersistentFlags().IntVar(&mc.period, "period", 60, "Period minutes")
-
 	cmd.PersistentFlags().StringVar(&hc.host, "mqtt", "tcp://localhost:1883", "MQTT endpoint")
-	cmd.PersistentFlags().StringVar(&hc.host, "t", fmt.Sprintf("nn/%s", name), "MQTT topic")
-	cmd.PersistentFlags().StringVar(&hc.host, "tc", fmt.Sprintf("nn/%s-control", name), "MQTT control topic")
-	cmd.PersistentFlags().StringVar(&hc.host, "ta", fmt.Sprintf("nn/%s-aval", name), "MQTT availability topic")
-	cmd.PersistentFlags().StringVar(&hc.host, "mqtt-user", "", "MQTT user")
-	cmd.PersistentFlags().StringVar(&hc.host, "mqtt-pass", "", "MQTT password")
-	cmd.PersistentFlags().StringVar(&hc.host, "mqtt-client", "", "Overwrite default MQTT client id")
-	cmd.PersistentFlags().StringVar(&hc.host, "mqtt-ca", "", "MQTT CA certificate file")
+	cmd.PersistentFlags().StringVar(&hc.topic, "mqtt-topic", fmt.Sprintf("nn/%s", name), "MQTT topic")
+	cmd.PersistentFlags().StringVar(&hc.topicc, "mqtt-topicc", fmt.Sprintf("nn/%s-control", name), "MQTT control topic")
+	cmd.PersistentFlags().StringVar(&hc.topica, "mqtt-topica", fmt.Sprintf("nn/%s-aval", name), "MQTT availability topic")
+	cmd.PersistentFlags().StringVar(&hc.user, "mqtt-user", "", "MQTT user")
+	cmd.PersistentFlags().StringVar(&hc.password, "mqtt-password", "", "MQTT password")
+	cmd.PersistentFlags().StringVar(&hc.cliId, "mqtt-client", "", "Overwrite default MQTT client id")
+	cmd.PersistentFlags().StringVar(&hc.ca, "mqtt-ca", "", "MQTT CA certificate file")
 	hc.name = name
 }
+
 func (hc *HassioConsumer[R]) Init(debug bool) error {
 	if debug {
 		MQTT.DEBUG = log.New(os.Stderr, "MQTT DEBUG    ", log.Ltime|log.Lshortfile)
@@ -71,20 +71,17 @@ func (hc *HassioConsumer[R]) Init(debug bool) error {
 	}
 	return nil
 }
-func (hc *HassioConsumer[R]) Consume(v R) error {
 
+func (hc *HassioConsumer[R]) Consume(v R) error {
 	jpl, err := json.Marshal(hc.Converter(v))
 	if err != nil {
-		log.Println(err)
+		return err
 	} else {
-		// if hmss.trace {
-		// 	log.Printf("MQTT Payload: %s\n", jpl)
-		// }
 		if token := hc.client.Publish(hc.topic, 1, false, jpl); token.WaitTimeout(timeout) && token.Error() != nil {
-			log.Println(token.Error())
+			return err
 		}
 		if token := hc.client.Publish(hc.topica, 0, false, online); token.WaitTimeout(timeout) && token.Error() != nil {
-			log.Println(token.Error())
+			return err
 		}
 	}
 
@@ -104,8 +101,9 @@ func (hc *HassioConsumer[R]) setupMqtt() error {
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
 	opts.OnConnect = func(c MQTT.Client) {
-		// TODO
-		//	hc.s.OnConnect(c, hc.topic, hc.topicc, hc.topica)
+		if hc.OnConnect != nil {
+			hc.OnConnect(c, hc.topic, hc.topicc, hc.topicc)
+		}
 	}
 
 	if hc.user != "" {
