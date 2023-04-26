@@ -24,7 +24,7 @@ type MemoryConsumer[R any] struct {
 type Entry map[string]any
 
 func (mc *MemoryConsumer[R]) Setup(cmd *cobra.Command, name string) {
-	cmd.PersistentFlags().IntVar(&mc.period, "period", 60, "Period minutes")
+	cmd.PersistentFlags().IntVar(&mc.period, "period", 60, "Period minutes to keep memory cache")
 }
 
 func (mc *MemoryConsumer[R]) Init(d bool) error {
